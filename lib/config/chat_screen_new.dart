@@ -2,13 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'package:flutter_tts/flutter_tts.dart';
 import 'chat_service.dart';
 import 'api_keys.dart';
 
 class ChatScreen extends StatefulWidget {
   final String userName;
   final String userId;
-  final String? existingChatId; // Optional - for continuing existing chats
+  final String? existingChatId;
 
   const ChatScreen({
     Key? key,
@@ -25,10 +26,13 @@ class _ChatScreenState extends State<ChatScreen> {
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final ChatService _chatService = ChatService();
+  final FlutterTts _flutterTts = FlutterTts();
 
   String? _currentChatId;
   bool _isLoading = false;
   bool _showGreeting = true;
+  bool _isSpeaking = false;
+  String? _speakingMessageId;
 
   // API Keys
   final List<String> _apiKeys = ApiKeys.geminiKeys;
@@ -50,6 +54,7 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void initState() {
     super.initState();
+    _initializeTts();
     if (widget.existingChatId != null) {
       _currentChatId = widget.existingChatId;
       _showGreeting = false;
@@ -57,6 +62,52 @@ class _ChatScreenState extends State<ChatScreen> {
     } else {
       _createNewChat();
     }
+  }
+
+  Future<void> _initializeTts() async {
+    await _flutterTts.setLanguage(_isEnglish ? 'en-US' : 'ja-JP');
+    await _flutterTts.setSpeechRate(0.5);
+    await _flutterTts.setVolume(1.0);
+    await _flutterTts.setPitch(1.0);
+
+    _flutterTts.setCompletionHandler(() {
+      setState(() {
+        _isSpeaking = false;
+        _speakingMessageId = null;
+      });
+    });
+
+    _flutterTts.setErrorHandler((msg) {
+      setState(() {
+        _isSpeaking = false;
+        _speakingMessageId = null;
+      });
+    });
+  }
+
+  Future<void> _speak(String text, String messageId) async {
+    if (_isSpeaking && _speakingMessageId == messageId) {
+      await _flutterTts.stop();
+      setState(() {
+        _isSpeaking = false;
+        _speakingMessageId = null;
+      });
+    } else {
+      await _flutterTts.stop();
+      setState(() {
+        _isSpeaking = true;
+        _speakingMessageId = messageId;
+      });
+      await _flutterTts.speak(text);
+    }
+  }
+
+  Future<void> _stopSpeaking() async {
+    await _flutterTts.stop();
+    setState(() {
+      _isSpeaking = false;
+      _speakingMessageId = null;
+    });
   }
 
   Future<void> _createNewChat() async {
@@ -67,7 +118,6 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _loadExistingConversation() async {
-    // Load past messages for conversation history
     final messages = await FirebaseFirestore.instance
         .collection('chats')
         .doc(_currentChatId!)
@@ -75,8 +125,6 @@ class _ChatScreenState extends State<ChatScreen> {
         .orderBy('timestamp', descending: false)
         .get();
 
-    // Only load if conversation history is empty (first load)
-    // Don't reload after language switch when history was cleared
     if (_conversationHistory.isEmpty) {
       for (var doc in messages.docs) {
         final data = doc.data();
@@ -100,12 +148,10 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _scrollToBottom() {
-    Future.delayed(const Duration(milliseconds: 100), () {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
-        _scrollController.animateTo(
+        _scrollController.jumpTo(
           _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
         );
       }
     });
@@ -113,7 +159,6 @@ class _ChatScreenState extends State<ChatScreen> {
 
   String _getSystemInstruction() {
     if (_isEnglish) {
-      // English mode - extremely explicit
       String instruction = '''LANGUAGE: ENGLISH ONLY - NO JAPANESE ALLOWED
 YOU MUST RESPOND ONLY IN ENGLISH.
 DO NOT USE ANY JAPANESE CHARACTERS.
@@ -199,7 +244,6 @@ Keep total response under 100 words but use emojis and line breaks for clarity.
 ALL TEXT MUST BE IN ENGLISH.''';
       }
     } else {
-      // Japanese mode - extremely explicit
       String instruction = '''言語: 日本語のみ - 英語使用禁止
 必ず日本語のみで返答してください。
 英語を一切使用しないでください。
@@ -290,19 +334,19 @@ ALL TEXT MUST BE IN ENGLISH.''';
     String userMessage = _messageController.text.trim();
     _messageController.clear();
 
+    await _stopSpeaking();
+
     setState(() {
       _showGreeting = false;
       _isLoading = true;
     });
 
-    // Save user message to Firestore
     await _chatService.saveMessage(
       chatId: _currentChatId!,
       message: userMessage,
       sender: 'user',
     );
 
-    // Add to conversation history for API
     _conversationHistory.add({
       "role": "user",
       "parts": [
@@ -310,10 +354,8 @@ ALL TEXT MUST BE IN ENGLISH.''';
       ]
     });
 
-    // Get AI response
     String aiResponse = await _getAIResponse(userMessage);
 
-    // Save AI response to Firestore
     await _chatService.saveMessage(
       chatId: _currentChatId!,
       message: aiResponse,
@@ -372,7 +414,6 @@ ALL TEXT MUST BE IN ENGLISH.''';
 
           print('Gemini API success!');
 
-          // Add AI response to conversation history
           _conversationHistory.add({
             "role": "model",
             "parts": [
@@ -427,7 +468,6 @@ ALL TEXT MUST BE IN ENGLISH.''';
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // Handle bar
                   Container(
                     width: 45,
                     height: 5,
@@ -438,7 +478,6 @@ ALL TEXT MUST BE IN ENGLISH.''';
                   ),
                   const SizedBox(height: 24),
 
-                  // Title
                   Text(
                     _isEnglish ? 'Settings' : '設定',
                     style: TextStyle(
@@ -449,7 +488,6 @@ ALL TEXT MUST BE IN ENGLISH.''';
                   ),
                   const SizedBox(height: 24),
 
-                  // Language Section
                   Align(
                     alignment: Alignment.centerLeft,
                     child: Text(
@@ -471,16 +509,15 @@ ALL TEXT MUST BE IN ENGLISH.''';
                           label: 'English',
                           isSelected: _isEnglish,
                           onTap: () async {
+                            await _stopSpeaking();
                             setState(() {
                               _isEnglish = true;
-                              // Clear conversation history for API
                               _conversationHistory.clear();
                             });
+                            await _flutterTts.setLanguage('en-US');
 
-                            // Close settings modal
                             Navigator.pop(context);
 
-                            // Add language switch message to chat
                             if (_currentChatId != null) {
                               await _chatService.saveMessage(
                                 chatId: _currentChatId!,
@@ -498,16 +535,15 @@ ALL TEXT MUST BE IN ENGLISH.''';
                           label: '日本語',
                           isSelected: !_isEnglish,
                           onTap: () async {
+                            await _stopSpeaking();
                             setState(() {
                               _isEnglish = false;
-                              // Clear conversation history for API
                               _conversationHistory.clear();
                             });
+                            await _flutterTts.setLanguage('ja-JP');
 
-                            // Close settings modal
                             Navigator.pop(context);
 
-                            // Add language switch message to chat
                             if (_currentChatId != null) {
                               await _chatService.saveMessage(
                                 chatId: _currentChatId!,
@@ -523,7 +559,6 @@ ALL TEXT MUST BE IN ENGLISH.''';
 
                   const SizedBox(height: 24),
 
-                  // Mode Section
                   Align(
                     alignment: Alignment.centerLeft,
                     child: Text(
@@ -744,9 +779,18 @@ ALL TEXT MUST BE IN ENGLISH.''';
         ),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () => Navigator.pop(context),
+          onPressed: () {
+            _stopSpeaking();
+            Navigator.pop(context);
+          },
         ),
         actions: [
+          if (_isSpeaking)
+            IconButton(
+              icon: const Icon(Icons.stop_circle, color: Colors.white),
+              onPressed: _stopSpeaking,
+              tooltip: _isEnglish ? 'Stop Speaking' : '音声停止',
+            ),
           IconButton(
             icon: const Icon(Icons.tune_rounded, size: 28),
             color: Colors.white,
@@ -755,6 +799,7 @@ ALL TEXT MUST BE IN ENGLISH.''';
           IconButton(
             icon: const Icon(Icons.add, color: Colors.white),
             onPressed: () {
+              _stopSpeaking();
               _createNewChat();
               setState(() {
                 _showGreeting = true;
@@ -803,6 +848,15 @@ ALL TEXT MUST BE IN ENGLISH.''';
                     return _buildGreetingScreen();
                   }
 
+                  // Auto-scroll to bottom when new messages arrive
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (_scrollController.hasClients) {
+                      _scrollController.jumpTo(
+                        _scrollController.position.maxScrollExtent,
+                      );
+                    }
+                  });
+
                   return ListView.builder(
                     controller: _scrollController,
                     padding: const EdgeInsets.all(16),
@@ -813,11 +867,16 @@ ALL TEXT MUST BE IN ENGLISH.''';
                       }
 
                       ChatMessage message = messages[index];
+                      bool isUser = message.sender == 'user';
+                      String messageId = '${message.timestamp.millisecondsSinceEpoch}';
+
                       return ChatBubble(
                         message: message,
                         userName: widget.userName,
                         primaryBlue: primaryBlue,
                         isEnglish: _isEnglish,
+                        onSpeak: isUser ? null : () => _speak(message.message, messageId),
+                        isSpeaking: !isUser && _isSpeaking && _speakingMessageId == messageId,
                       );
                     },
                   );
@@ -1038,6 +1097,7 @@ ALL TEXT MUST BE IN ENGLISH.''';
   void dispose() {
     _messageController.dispose();
     _scrollController.dispose();
+    _flutterTts.stop();
     super.dispose();
   }
 }
@@ -1048,6 +1108,8 @@ class ChatBubble extends StatelessWidget {
   final String userName;
   final Color primaryBlue;
   final bool isEnglish;
+  final VoidCallback? onSpeak;
+  final bool isSpeaking;
 
   const ChatBubble({
     super.key,
@@ -1055,6 +1117,8 @@ class ChatBubble extends StatelessWidget {
     required this.userName,
     required this.primaryBlue,
     required this.isEnglish,
+    this.onSpeak,
+    this.isSpeaking = false,
   });
 
   @override
@@ -1089,63 +1153,85 @@ class ChatBubble extends StatelessWidget {
             const SizedBox(width: 12),
           ],
           Flexible(
-            child: Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: isUser ? primaryBlue : Colors.white,
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                  color: isUser ? Colors.transparent : Colors.grey.shade200,
-                  width: 1.5,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.08),
-                    blurRadius: 10,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Text(
-                        isUser
-                            ? (isEnglish ? 'You' : 'あなた')
-                            : (isEnglish ? 'Assistant' : 'アシスタント'),
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: isUser
-                              ? Colors.white.withOpacity(0.9)
-                              : primaryBlue,
-                        ),
+            child: Column(
+              crossAxisAlignment:
+              isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: isUser ? primaryBlue : Colors.white,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: isUser ? Colors.transparent : Colors.grey.shade200,
+                      width: 1.5,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.08),
+                        blurRadius: 10,
+                        offset: const Offset(0, 2),
                       ),
-                      const Spacer(),
+                    ],
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Text(
+                            isUser
+                                ? (isEnglish ? 'You' : 'あなた')
+                                : (isEnglish ? 'Assistant' : 'アシスタント'),
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: isUser
+                                  ? Colors.white.withOpacity(0.9)
+                                  : primaryBlue,
+                            ),
+                          ),
+                          const Spacer(),
+                          Text(
+                            _formatTime(message.timestamp),
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: isUser
+                                  ? Colors.white.withOpacity(0.7)
+                                  : Colors.grey.shade600,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
                       Text(
-                        _formatTime(message.timestamp),
+                        message.message,
                         style: TextStyle(
-                          fontSize: 12,
-                          color: isUser
-                              ? Colors.white.withOpacity(0.7)
-                              : Colors.grey.shade600,
+                          fontSize: 16,
+                          height: 1.6,
+                          color: isUser ? Colors.white : Colors.black87,
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 8),
-                  Text(
-                    message.message,
-                    style: TextStyle(
-                      fontSize: 16,
-                      height: 1.6,
-                      color: isUser ? Colors.white : Colors.black87,
+                ),
+                if (!isUser && onSpeak != null) ...[
+                  const SizedBox(height: 6),
+                  IconButton(
+                    icon: Icon(
+                      isSpeaking ? Icons.stop_circle : Icons.volume_up,
+                      color: isSpeaking ? Colors.red : primaryBlue,
+                      size: 22,
                     ),
+                    onPressed: onSpeak,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                    tooltip: isSpeaking
+                        ? (isEnglish ? 'Stop' : '停止')
+                        : (isEnglish ? 'Speak' : '読み上げ'),
                   ),
                 ],
-              ),
+              ],
             ),
           ),
           if (isUser) ...[
