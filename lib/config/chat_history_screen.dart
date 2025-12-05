@@ -43,7 +43,7 @@ class ChatHistoryScreen extends StatelessWidget {
                   builder: (BuildContext context) {
                     return AlertDialog(
                       title: const Text('すべて削除'),
-                      content: const Text('すべての会話を削除しますか？\nこの操作は取り消せません。'),
+                      content: const Text('すべての会話を削除しますか?\nこの操作は取り消せません。'),
                       actions: [
                         TextButton(
                           onPressed: () => Navigator.of(context).pop(false),
@@ -237,7 +237,7 @@ class ChatHistoryScreen extends StatelessWidget {
           builder: (BuildContext context) {
             return AlertDialog(
               title: const Text('削除の確認'),
-              content: const Text('この会話を削除しますか？'),
+              content: const Text('この会話を削除しますか?'),
               actions: [
                 TextButton(
                   onPressed: () => Navigator.of(context).pop(false),
@@ -335,6 +335,51 @@ class ChatHistoryScreen extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 8),
+                // Delete button
+                IconButton(
+                  icon: const Icon(
+                    Icons.delete_outline,
+                    color: Colors.red,
+                    size: 24,
+                  ),
+                  onPressed: () async {
+                    bool? confirm = await showDialog<bool>(
+                      context: context,
+                      builder: (BuildContext context) {
+                        return AlertDialog(
+                          title: const Text('削除の確認'),
+                          content: const Text('この会話を削除しますか?'),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.of(context).pop(false),
+                              child: const Text('キャンセル'),
+                            ),
+                            TextButton(
+                              onPressed: () => Navigator.of(context).pop(true),
+                              style: TextButton.styleFrom(
+                                foregroundColor: Colors.red,
+                              ),
+                              child: const Text('削除'),
+                            ),
+                          ],
+                        );
+                      },
+                    );
+
+                    if (confirm == true && context.mounted) {
+                      await ChatService().deleteChat(chatId);
+
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('会話を削除しました'),
+                            backgroundColor: Colors.green,
+                          ),
+                        );
+                      }
+                    }
+                  },
+                ),
                 Icon(
                   Icons.chevron_right,
                   color: Colors.grey[400],

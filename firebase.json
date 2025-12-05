@@ -1,1 +1,20 @@
-{"flutter":{"platforms":{"android":{"default":{"projectId":"medi-navi2025","appId":"1:375929819946:android:71b75982b8864b53e50453","fileOutput":"android/app/google-services.json"}},"dart":{"lib/firebase_options.dart":{"projectId":"medi-navi2025","configurations":{"android":"1:375929819946:android:71b75982b8864b53e50453","ios":"1:375929819946:ios:7f22ade50ff43340e50453","macos":"1:375929819946:ios:7f22ade50ff43340e50453","web":"1:375929819946:web:0d44f4376cfd1c25e50453","windows":"1:375929819946:web:e2c35dc010905d28e50453"}}}}}}
+{
+  "firestore": {
+    "indexes": [
+      {
+        "collectionGroup": "chats",
+        "queryScope": "COLLECTION",
+        "fields": [
+          {
+            "fieldPath": "userId",
+            "order": "ASCENDING"
+          },
+          {
+            "fieldPath": "lastMessageTime",
+            "order": "DESCENDING"
+          }
+        ]
+      }
+    ]
+  }
+}
